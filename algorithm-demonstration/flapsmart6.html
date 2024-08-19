@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flappy Bird Game with Q-Learning</title>
+    <style>
+        canvas {
+            border: 1px solid #000;
+            display: block;
+            margin: 0 auto;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas" width="480" height="640"></canvas>
+    <div id="status"></div>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const statusDiv = document.getElementById('status');
+
+        // Game variables
+        let bird = {
+            x: 50,
+            y: canvas.height / 2,
+            velocity: 0,
+            radius: 20
+        };
+
+        let pipes = [];
+        const PIPE_WIDTH = 50;
+        const PIPE_GAP = 150;
+        const PIPE_SPEED = 2;
+
+        let score = 0;
+        let gameOver = false;
+
+        // Game constants
+        const GRAVITY = 0.5;
+        const FLAP_STRENGTH = -10;
+
+        // Q-learning variables
+        let qTable = {};
+        let epsilon = 0.1;  // Initial exploration rate
+        const epsilonDecay = 0.995;  // Decay rate for epsilon
+        const minEpsilon = 0.01;  // Minimum epsilon value
+        let alpha = 0.1;    // Learning rate
+        let gamma = 0.9;    // Discount factor
+        let generation = 0;
+        let bestScore = 0;
+
+        function getState() {
+            const nearestPipe = getNearestPipe();
+            return [
+                Math.floor(bird.y / 10),
+                Math.floor(bird.velocity / 2),
+                Math.floor((nearestPipe.x - bird.x) / 10),
+                Math.floor(nearestPipe.top / 10)
+            ].join(',');
+        }
+
+        function getQValue(state, action) {
+            if (!qTable[state]) qTable[state] = [0, 0, 0];
+            return qTable[state][action];
+        }
+
+        function setQValue(state, action, value) {
+            if (!qTable[state]) qTable[state] = [0, 0, 0];
+            qTable[state][action] = value;
+        }
+
+        function chooseAction(state) {
+            if (Math.random() < epsilon) {
+                return Math.floor(Math.random() * 3);  // Random action (explore)
+            } else {
+                const qValues = qTable[state] || [0, 0, 0];
+                return qValues.indexOf(Math.max(...qValues));  // Best action (exploit)
+            }
+        }
+
+        function getNearestPipe() {
+            return pipes.find(pipe => pipe.x + PIPE_WIDTH > bird.x) || { x: canvas.width, top: 0, bottom: canvas.height };
+        }
+
+        function resetGame() {
+            bird.y = canvas.height / 2;
+            bird.velocity = 0;
+            pipes = [];
+            score = 0;
+            gameOver = false;
+        }
+
+        function drawBird() {
+            ctx.fillStyle = 'yellow';
+            ctx.beginPath();
+            ctx.arc(bird.x, bird.y, bird.radius, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        function drawPipes() {
+            ctx.fillStyle = 'green';
+            pipes.forEach(pipe => {
+                ctx.fillRect(pipe.x, 0, PIPE_WIDTH, pipe.top);
+                ctx.fillRect(pipe.x, pipe.bottom, PIPE_WIDTH, canvas.height - pipe.bottom);
+            });
+        }
+
+        function drawScore() {
+            ctx.fillStyle = 'black';
+            ctx.font = '24px Arial';
+            ctx.fillText(`Score: ${score.toFixed(2)}`, 10, 30);
+        }
+
+        function createPipe() {
+            let pipeY = Math.random() * (canvas.height - PIPE_GAP) + PIPE_WIDTH;
+            pipes.push({
+                x: canvas.width,
+                top: pipeY - PIPE_WIDTH,
+                bottom: pipeY + PIPE_GAP
+            });
+        }
+
+        function updatePipes() {
+            pipes.forEach(pipe => {
+                pipe.x -= PIPE_SPEED;
+            });
+
+            if (pipes.length > 0 && pipes[0].x < -PIPE_WIDTH) {
+                pipes.shift();
+                score += 1;  // Increase score by 1 each time a pipe is passed
+            }
+
+            if (pipes.length === 0 || pipes[pipes.length - 1].x < canvas.width - 200) {
+                createPipe();
+            }
+        }
+
+        function checkCollision() {
+            if (bird.y + bird.radius > canvas.height || bird.y - bird.radius < 0) {
+                return true;
+            }
+
+            for (let pipe of pipes) {
+                if (bird.x + bird.radius > pipe.x && bird.x - bird.radius < pipe.x + PIPE_WIDTH) {
+                    if (bird.y - bird.radius < pipe.top || bird.y + bird.radius > pipe.bottom) {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        function gameLoop() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (!gameOver) {
+                const currentState = getState();
+                const action = chooseAction(currentState);
+
+                if (action === 1) {
+                    bird.velocity = FLAP_STRENGTH;
+                } else if (action === 2) {
+                    bird.velocity += 0;  // Pause action, no change in velocity
+                }
+
+                bird.velocity += GRAVITY;
+                bird.y += bird.velocity;
+
+                updatePipes();
+
+                // Increase score for staying alive
+                score += 0.01;
+
+                if (checkCollision()) {
+                    gameOver = true;
+
+                    const nearestPipe = getNearestPipe();
+                    const reward = -100;  // Negative reward for crashing
+                    const nextState = getState();
+                    const nextQValue = Math.max(getQValue(nextState, 0), getQValue(nextState, 1), getQValue(nextState, 2));
+
+                    // Q-learning update
+                    const oldQValue = getQValue(currentState, action);
+                    const newQValue = oldQValue + alpha * (reward + gamma * nextQValue - oldQValue);
+                    setQValue(currentState, action, newQValue);
+
+                    if (score > bestScore) {
+                        bestScore = score;
+                    }
+                    generation++;
+                    statusDiv.innerHTML = `Generation: ${generation}, Best Score: ${bestScore.toFixed(2)}, Current Score: ${score.toFixed(2)}`;
+
+                    // Increase exploration rate after failure
+                    epsilon = Math.min(0.3, epsilon * 1.2);
+
+                    setTimeout(resetGame, 1000);
+                } else {
+                    const reward = 1;  // Positive reward for staying alive
+                    const nextState = getState();
+                    const nextQValue = Math.max(getQValue(nextState, 0), getQValue(nextState, 1), getQValue(nextState, 2));
+
+                    // Q-learning update
+                    const oldQValue = getQValue(currentState, action);
+                    const newQValue = oldQValue + alpha * (reward + gamma * nextQValue - oldQValue);
+                    setQValue(currentState, action, newQValue);
+
+                    // Gradually decrease exploration rate
+                    epsilon = Math.max(minEpsilon, epsilon * epsilonDecay);
+                }
+            }
+
+            drawBird();
+            drawPipes();
+            drawScore();
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        resetGame();
+        gameLoop();
+    </script>
+</body>
+</html>
