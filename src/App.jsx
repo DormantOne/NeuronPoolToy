@@ -1,30 +1,37 @@
-import './App.css'
+import { useState } from 'react';
+import './App.css';
 import FrameLimiter from './lib/FrameLimiter';
-import './Utils.css'
+import './Utils.css';
 
-import { useRef, useEffect, useState } from 'react'
+import { useEffect, useRef } from 'react';
 
 function App() {
-  const frameLimiter = new FrameLimiter(60)
+  const frameLimiter = new FrameLimiter(60);
   const canvasRef = useRef(null);
-  const fpsDisplayRef = useRef(null)
+  const fpsDisplayRef = useRef(null);
 
-  const [bird, setBird] = useState({ y: 240, velocity: 0 });
-  const [pipes, setPipes] = useState([]);
-  const [gameOver, setGameOver] = useState(false);
-  const [score, setScore] = useState(0);
-  const [lastPipeSpawn, setLastPipeSpawn] = useState(0);
+  const BIRD_RADIUS = 15;
+  const BIRD_X = 40;
 
-  const gravity = 1000; // pixels per second squared
-  const jumpStrength = -400; // pixels per second
-  const pipeWidth = 50;
-  const pipeGap = 150;
-  const pipeSpeed = 200; // pixels per second
-  const pipeSpawnInterval = 1.5; // seconds
+  const GRAVITY_ACCELERATION = 400; //pixels per second squared
+  const FLAP_VELOCITY = 150; // pixels per second per full keypress
+  // Using acceleration would be relevant if we cared about how long a button is held
+  // but this does nto apply to flappy bird
 
-  function gameLoop(){
+  const gameOverDisplayRef = useRef(null)
+
+  const gameOverRef = useRef(false)
+
+  const birdStateRef = useRef({
+    y: 240,
+    yVelocity: 0
+  });
+
+
+
+  function gameLoop() {
     const canvas = canvasRef.current;
-    if (!canvas){
+    if (!canvas) {
       console.warn("attempted to perform gameLoop before canvas was mounted");
       window.requestAnimationFrame(gameLoop);
       return;
@@ -32,112 +39,60 @@ function App() {
 
     const ctx = canvas.getContext('2d');
     const deltaTime = frameLimiter.getDeltaTime()
-    if(deltaTime===undefined){
+    if (deltaTime === undefined) {
       window.requestAnimationFrame(gameLoop);
       return
     }
 
-    if(fpsDisplayRef.current){
-      fpsDisplayRef.current.textContent=(1.0/deltaTime).toFixed(3)
+    if (fpsDisplayRef.current) {
+      fpsDisplayRef.current.textContent = (1.0 / deltaTime).toFixed(3)
     }
+
+
+
 
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Update game state
-    if (!gameOver) {
-      // Update bird position
-      setBird(prevBird => ({
-        y: prevBird.y + prevBird.velocity * deltaTime,
-        velocity: prevBird.velocity + gravity * deltaTime
-      }));
+    // Draw bird
+    ctx.beginPath();
+    ctx.arc(BIRD_X, birdStateRef.current.y, BIRD_RADIUS, 0, 2 * Math.PI);
+    ctx.fillStyle = 'red';  // You can choose the fill color
+    ctx.fill();
+    ctx.closePath();
 
-      // Generate new pipes
-      setLastPipeSpawn(prevTime => {
-        const newTime = prevTime + deltaTime;
-        if (newTime >= pipeSpawnInterval) {
-          const newPipeY = Math.random() * (canvas.height - pipeGap - 100) + 50;
-          setPipes(prevPipes => [...prevPipes, { x: canvas.width, y: newPipeY }]);
-          return 0;
-        }
-        return newTime;
-      });
-
-      // Move pipes
-      setPipes(prevPipes => 
-        prevPipes.map(pipe => ({ ...pipe, x: pipe.x - pipeSpeed * deltaTime }))
-          .filter(pipe => pipe.x > -pipeWidth)
-      );
-
-      // Check for collisions
-      const birdRect = { x: 50, y: bird.y, width: 30, height: 30 };
-      pipes.forEach(pipe => {
-        const upperPipeRect = { x: pipe.x, y: 0, width: pipeWidth, height: pipe.y };
-        const lowerPipeRect = { x: pipe.x, y: pipe.y + pipeGap, width: pipeWidth, height: canvas.height - pipe.y - pipeGap };
-
-        if (
-          checkCollision(birdRect, upperPipeRect) ||
-          checkCollision(birdRect, lowerPipeRect) ||
-          bird.y < 0 ||
-          bird.y + 30 > canvas.height
-        ) {
-          setGameOver(true);
-        }
-      });
-
-      // Update score
-      pipes.forEach(pipe => {
-        if (pipe.x + pipeWidth < 50 && pipe.x + pipeWidth + pipeSpeed * deltaTime >= 50) {
-          setScore(prevScore => prevScore + 1);
-        }
-      });
+    //collision check
+    if (birdStateRef.current.y >= 480) {
+      gameOverRef.current=true
+      gameOverDisplayRef.current.style.display="flex"
+    }
+    if (birdStateRef.current.y <= 0) {
+      gameOverRef.current=true
+      gameOverDisplayRef.current.style.display="flex"
     }
 
-    // Draw bird
-    ctx.fillStyle = 'yellow';
-    ctx.fillRect(50, bird.y, 30, 30);
-
-    // Draw pipes
-    ctx.fillStyle = 'green';
-    pipes.forEach(pipe => {
-      ctx.fillRect(pipe.x, 0, pipeWidth, pipe.y);
-      ctx.fillRect(pipe.x, pipe.y + pipeGap, pipeWidth, canvas.height - pipe.y - pipeGap);
-    });
-
-    // Draw score
-    ctx.fillStyle = 'black';
-    ctx.font = '24px Arial';
-    ctx.fillText(`Score: ${score}`, 10, 30);
-
-    if (gameOver) {
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = 'white';
-      ctx.font = '48px Arial';
-      ctx.fillText('Game Over', canvas.width / 2 - 100, canvas.height / 2);
+    if (!gameOverRef.current) {
+      //physics of the game
+      const deltaVelocity = GRAVITY_ACCELERATION * deltaTime;
+      birdStateRef.current.yVelocity += deltaVelocity;
+      birdStateRef.current.y += birdStateRef.current.yVelocity * deltaTime;
     }
 
     window.requestAnimationFrame(gameLoop);
   }
 
-  function checkCollision(rect1, rect2) {
-    return (
-      rect1.x < rect2.x + rect2.width &&
-      rect1.x + rect1.width > rect2.x &&
-      rect1.y < rect2.y + rect2.height &&
-      rect1.y + rect1.height > rect2.y
-    );
-  }
+
 
   function handleKeyPress(e) {
-    if (e.code === 'Space' && !gameOver) {
-      setBird(prevBird => ({ ...prevBird, velocity: jumpStrength }));
-    } else if (e.code === 'Space' && gameOver) {
-      setGameOver(false);
-      setBird({ y: 240, velocity: 0 });
-      setPipes([]);
-      setScore(0);
-      setLastPipeSpawn(0);
+    if (e.code === 'Space') {
+      if(gameOverRef.current){
+        birdStateRef.current.y = 240;
+        birdStateRef.current.yVelocity = 0;
+        gameOverDisplayRef.current.style.display="none"
+        gameOverRef.current = false
+      }else{
+        birdStateRef.current.yVelocity -= FLAP_VELOCITY;
+      }
     }
   }
 
@@ -146,7 +101,7 @@ function App() {
     return () => {
       window.removeEventListener('keydown', handleKeyPress);
     };
-  }, [gameOver]);
+  }, []);
 
   useEffect(() => {
     if (canvasRef.current) {
@@ -165,7 +120,7 @@ function App() {
         position: "relative"
       }}>
         <canvas ref={canvasRef} style={{
-          border: '2px solid black', 
+          border: '2px solid black',
           width: '640px',
           height: '480px'
         }} width='640' height='480'></canvas>
@@ -176,6 +131,24 @@ function App() {
           color: "green",
           fontSize: "16px"
         }} ref={fpsDisplayRef}></div>
+        <div style={{
+          display: "none",
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center"
+        }} ref={gameOverDisplayRef}>
+          <h1 style={{
+            fontSize: "64px",
+            fontWeight: "bold",
+            color: "red"
+          }}>Game Over</h1>
+
+        </div>
       </div>
     </div>
   )
