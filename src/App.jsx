@@ -26,11 +26,11 @@ function App() {
   const GRAVITY_ACCELERATION = 400; //pixels per second squared
   const FLAP_VELOCITY = 200; // pixels per second per full keypress
   // Using acceleration would be relevant if we cared about how long a button is held
-  // but this does nto apply to flappy bird
+  // but this does not apply to flappy bird
 
   const gameOverDisplayRef = useRef(null)
 
-  const gameOverRef = useRef(false)
+  const gameOverRef = useRef(true)
 
   const scoreRef = useRef(0)
 
@@ -42,6 +42,8 @@ function App() {
   });
 
   const pipesStateRef = useRef([]);
+
+  const hasStartedRef = useRef(false)
 
   function clearPipes() {
     pipesStateRef.current = [];
@@ -78,6 +80,10 @@ function App() {
   }
 
   function resetGame() {
+    hasStartedRef.current = true
+    gameOverDisplayRef.current.style.display = "none"
+    gameOverDisplayRef.current.textContent = "Game Over"
+    gameOverDisplayRef.current.style.color = "red"
     birdStateRef.current.y = 240;
     birdStateRef.current.yVelocity = 0;
     gameOverDisplayRef.current.style.display = "none"
@@ -89,9 +95,10 @@ function App() {
     }
   }
 
-  useEffect(() => {
-    resetGame()
-  }, [])
+  function setGameOver() {
+    gameOverRef.current = true
+    gameOverDisplayRef.current.style.display = "flex"
+  }
 
   function gameLoop() {
     const canvas = canvasRef.current;
@@ -143,12 +150,31 @@ function App() {
 
     //collision check
     if (birdStateRef.current.y >= 480) {
-      gameOverRef.current = true
-      gameOverDisplayRef.current.style.display = "flex"
+      setGameOver();
     }
     if (birdStateRef.current.y <= 0) {
-      gameOverRef.current = true
-      gameOverDisplayRef.current.style.display = "flex"
+      setGameOver();
+    }
+
+    // pipe collision check
+
+    for (const pipe of pipesStateRef.current) {
+      // first, check if pipe has any chance to be relevant
+      if (
+        (pipe.x + PIPE_WIDTH / 2 >= BIRD_X - BIRD_RADIUS) &&
+        (pipe.x - PIPE_WIDTH / 2 <= BIRD_X + BIRD_RADIUS)
+      ) {
+        // then check if bird is outside window
+        if (!(
+          ((birdStateRef.current.y - BIRD_RADIUS) >= (pipe.y - PIPE_WINDOW_SIZE / 2)) &&
+          (
+            (birdStateRef.current.y + BIRD_RADIUS) <= (pipe.y + PIPE_WINDOW_SIZE / 2)
+          )
+        )) {
+          setGameOver()
+          break
+        }
+      }
     }
 
     if (!gameOverRef.current) {
@@ -238,7 +264,7 @@ function App() {
           padding: 0
         }} ref={scoreDisplayRef}>0</div>
         <div style={{
-          display: "none",
+          display: "flex",
           position: "absolute",
           top: 0,
           left: 0,
@@ -247,13 +273,12 @@ function App() {
           flexDirection: "column",
           alignItems: "center",
           justifyContent: "center"
-        }} ref={gameOverDisplayRef}>
+        }} >
           <h1 style={{
             fontSize: "64px",
             fontWeight: "bold",
-            color: "red"
-          }}>Game Over</h1>
-
+            color: "blue"
+          }} ref={gameOverDisplayRef}>Press Space to Play</h1>
         </div>
       </div>
       <div style={{
