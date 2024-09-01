@@ -1,0 +1,13 @@
+.vispanel {
+    height:100%;
+    padding:4px;
+    border:2px solid black;
+}
+
+.vispanel-neuralnet {
+
+}
+
+.vispanel-metrics {
+    gap:4px;
+}
