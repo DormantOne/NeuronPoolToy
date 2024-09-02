@@ -113,8 +113,43 @@ ${Object.keys(metricsStateRef.current).join(", ")}
     updateMetricsTableInUI();
   }
 
+  function updateBestScore()
+  {
+    const previousBestScore = getMetric('bestScore');
+    const currentScore = getMetric('score');
+    if (currentScore > previousBestScore){
+      setMetricAndUpdateUI('bestScore', currentScore)
+    }
+  }
+
   function incrementScore() {
     setMetricAndUpdateUI("score", getMetric("score") + 1);
+    updateBestScore();
+  }
+
+  function addElapstedTime(deltaTimeSeconds){
+    const currentTimeSurvived = getMetric('timeSurvived');
+    const newTimeSurvived = currentTimeSurvived + deltaTimeSeconds;
+    const currentBestTimeSurvived = getMetric('bestTimeSurvived');
+
+    setMetricAndUpdateUI('timeSurvived', newTimeSurvived);
+
+    if (newTimeSurvived > currentBestTimeSurvived){
+      setMetricAndUpdateUI('bestTimeSurvived', newTimeSurvived);
+    }
+
+  }
+
+  function incrementCeilingHits(){
+    setMetricAndUpdateUI("ceilingHits", getMetric("ceilingHits") + 1);
+  }
+
+  function incrementFloorHits(){
+    setMetricAndUpdateUI("floorHits", getMetric("floorHits") + 1);
+  }
+
+  function incrementBarHits(){
+    setMetricAndUpdateUI("barHits", getMetric("barHits") + 1);
   }
 
   function clearPipes() {
@@ -158,6 +193,7 @@ ${Object.keys(metricsStateRef.current).join(", ")}
     gameOverDisplayRef.current.style.display = "none";
     gameOverRef.current = false;
     setMetricAndUpdateUI("score", 0);
+    setMetricAndUpdateUI('timeSurvived',0);
     clearPipes();
     for (let i = 0; i < numBufferedPipes; i++) {
       spawnOrReusePipe(i * PIPE_SPACING, null);
@@ -227,11 +263,17 @@ ${Object.keys(metricsStateRef.current).join(", ")}
       );
     }
 
+    if (! gameOverRef.current){
+      addElapstedTime(deltaTime);
+    }
+
     //collision check
     if (birdStateRef.current.y >= 480) {
+      if (! gameOverRef.current) {incrementFloorHits();}
       setGameOver();
     }
     if (birdStateRef.current.y <= 0) {
+      if (! gameOverRef.current) {incrementCeilingHits();}
       setGameOver();
     }
 
@@ -252,6 +294,7 @@ ${Object.keys(metricsStateRef.current).join(", ")}
               pipe.y + PIPE_WINDOW_SIZE / 2
           )
         ) {
+          if (! gameOverRef.current) {incrementBarHits();}
           setGameOver();
           break;
         }
