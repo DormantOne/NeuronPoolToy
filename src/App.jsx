@@ -1,9 +1,18 @@
-import { useState } from "react";
 import "./App.css";
 import FrameLimiter from "./lib/FrameLimiter";
 import "./Utils.css";
+import { checkRectanglesCollide } from "./lib/collision";
 
 import { useEffect, useRef } from "react";
+
+/**
+ * @typedef {object} Pipe - datastructure for the pipe
+ * @property {number} x - x coordinate for center of pipe
+ * @property {number} y - y coordinate for center of gap
+ * @property {boolean} scoreable -
+ * this will be true if the pipe center has not yet passed the bird
+ * used primarily to allow pipes to not need to be ordered when stored
+ */
 
 function App() {
   const frameLimiter = new FrameLimiter(60);
@@ -19,6 +28,8 @@ function App() {
   const PIPE_WINDOW_MIN_DISTANCE = 40;
   const PIPE_WIDTH = 40;
 
+  const SENSOR_SQUARE_SIZE = 20;
+
   const numBufferedPipes = Math.ceil(640 / PIPE_SPACING) + 2;
   const minPipeY = PIPE_WINDOW_MIN_DISTANCE + PIPE_WINDOW_SIZE / 2;
   const maxPipeY = 480 - PIPE_WINDOW_MIN_DISTANCE - PIPE_WINDOW_SIZE / 2;
@@ -27,6 +38,8 @@ function App() {
   const FLAP_VELOCITY = 200; // pixels per second per full keypress
   // Using acceleration would be relevant if we cared about how long a button is held
   // but this does not apply to flappy bird
+
+
 
   const gameOverDisplayRef = useRef(null);
 
@@ -37,6 +50,9 @@ function App() {
     yVelocity: 0,
   });
 
+  /**
+   * @type {import('react').MutableRefObject<Array<Pipe>>}
+   */
   const pipesStateRef = useRef([]);
 
   const hasStartedRef = useRef(false);
@@ -61,6 +77,15 @@ function App() {
   const metricsTableCeilingHitsRef = useRef(null);
   const metricsTableFloorHitsRef = useRef(null);
   const metricsTableBarHitsRef = useRef(null);
+
+  const numSquaresX = Math.floor(640 / SENSOR_SQUARE_SIZE);
+  const numSquaresY = Math.floor(480 / SENSOR_SQUARE_SIZE);
+
+  const sensorGridRef = useRef(
+    new Array(numSquaresY).fill(false).map(() => {
+      return new Array(numSquaresX).fill(false);
+    })
+  );
 
   function updateMetricsTableInUI() {
     const score = metricsStateRef.current.score;
@@ -113,12 +138,11 @@ ${Object.keys(metricsStateRef.current).join(", ")}
     updateMetricsTableInUI();
   }
 
-  function updateBestScore()
-  {
-    const previousBestScore = getMetric('bestScore');
-    const currentScore = getMetric('score');
-    if (currentScore > previousBestScore){
-      setMetricAndUpdateUI('bestScore', currentScore)
+  function updateBestScore() {
+    const previousBestScore = getMetric("bestScore");
+    const currentScore = getMetric("score");
+    if (currentScore > previousBestScore) {
+      setMetricAndUpdateUI("bestScore", currentScore);
     }
   }
 
@@ -127,28 +151,27 @@ ${Object.keys(metricsStateRef.current).join(", ")}
     updateBestScore();
   }
 
-  function addElapstedTime(deltaTimeSeconds){
-    const currentTimeSurvived = getMetric('timeSurvived');
+  function addElapstedTime(deltaTimeSeconds) {
+    const currentTimeSurvived = getMetric("timeSurvived");
     const newTimeSurvived = currentTimeSurvived + deltaTimeSeconds;
-    const currentBestTimeSurvived = getMetric('bestTimeSurvived');
+    const currentBestTimeSurvived = getMetric("bestTimeSurvived");
 
-    setMetricAndUpdateUI('timeSurvived', newTimeSurvived);
+    setMetricAndUpdateUI("timeSurvived", newTimeSurvived);
 
-    if (newTimeSurvived > currentBestTimeSurvived){
-      setMetricAndUpdateUI('bestTimeSurvived', newTimeSurvived);
+    if (newTimeSurvived > currentBestTimeSurvived) {
+      setMetricAndUpdateUI("bestTimeSurvived", newTimeSurvived);
     }
-
   }
 
-  function incrementCeilingHits(){
+  function incrementCeilingHits() {
     setMetricAndUpdateUI("ceilingHits", getMetric("ceilingHits") + 1);
   }
 
-  function incrementFloorHits(){
+  function incrementFloorHits() {
     setMetricAndUpdateUI("floorHits", getMetric("floorHits") + 1);
   }
 
-  function incrementBarHits(){
+  function incrementBarHits() {
     setMetricAndUpdateUI("barHits", getMetric("barHits") + 1);
   }
 
@@ -193,8 +216,13 @@ ${Object.keys(metricsStateRef.current).join(", ")}
     gameOverDisplayRef.current.style.display = "none";
     gameOverRef.current = false;
     setMetricAndUpdateUI("score", 0);
-    setMetricAndUpdateUI('timeSurvived',0);
+    setMetricAndUpdateUI("timeSurvived", 0);
     clearPipes();
+    for (let sgIndexY = 0; sgIndexY < numSquaresY; sgIndexY++) {
+      for (let sgIndexX = 0; sgIndexX < numSquaresX; sgIndexX++) {
+        sensorGridRef.current[sgIndexY][sgIndexX] = false;
+      }
+    }
     for (let i = 0; i < numBufferedPipes; i++) {
       spawnOrReusePipe(i * PIPE_SPACING, null);
     }
@@ -203,6 +231,138 @@ ${Object.keys(metricsStateRef.current).join(", ")}
   function setGameOver() {
     gameOverRef.current = true;
     gameOverDisplayRef.current.style.display = "flex";
+  }
+
+  /**
+   * given the state of the pipes on the playfield
+   * simulate visual sensors by computing where pipes a grid of
+   * square sensored regions based off the current pipe state
+   *
+   * @remarks
+   * first we determine the sensor size as pipe width / SENSORS_PER_PIPE
+   * for now will let it be 2 to reduce data size but 3 may be more effective
+   * then we round down the pixel size of each sensor square
+   * then we round down the playfield size so we have an even number of squares
+   * this means that a few pixels on bottom edge or right edge may not be accounted for
+   */
+  function computeAndDrawVisualSensorData(ctx) {
+    for (let sgIndexY = 0; sgIndexY < numSquaresY; sgIndexY++) {
+      for (let sgIndexX = 0; sgIndexX < numSquaresX; sgIndexX++) {
+        sensorGridRef.current[sgIndexY][sgIndexX] = false;
+      }
+    }
+
+    // at this point we have an empty sensor grid - all set to false
+    // goal number 2 is to loop through each pipe state and 'draw it'
+    // onto the grid
+    // the naive way is to go through each pipe and see the sensor
+    // instead we need to focus on each pipe - focus on region.
+
+    // extract the state of the pipes from the current game state
+    const pipesState = pipesStateRef.current;
+
+    // loop through each pipe
+    for (const pipe of pipesState) {
+      const pipeX = pipe.x;
+      const pipeY = pipe.y;
+      const scoreable = pipe.scoreable;
+      if (!scoreable) {
+        continue;
+      }
+      // goal - narrow down region of sensors that will matter
+      // will use ceiling and floor functions
+      // pipe will have affect on sensor no greater than its leftmost point
+      const leftSearchBorder = pipeX - PIPE_WIDTH / 2;
+      const rightSearchBorder = pipeX + PIPE_WIDTH / 2;
+      const bufferedLeftSearchBorder =
+        Math.floor(leftSearchBorder / SENSOR_SQUARE_SIZE) * SENSOR_SQUARE_SIZE;
+      const bufferedRightSearchBorder =
+        Math.ceil(rightSearchBorder / SENSOR_SQUARE_SIZE) * SENSOR_SQUARE_SIZE;
+      const sensorGridSearchRegionXIndexStartInclusive =
+        bufferedLeftSearchBorder / SENSOR_SQUARE_SIZE; //we know it will be whole #
+      const sensorGridSearchRegionXIndexEndInclusive =
+        bufferedRightSearchBorder / SENSOR_SQUARE_SIZE;
+      const sensorGridSearchRegionYIndexStartInclusive = 0;
+      const sensorGridSearchRegionYIndexEndInclusive = numSquaresY - 1;
+      // goal - we want to do a 2 d loop through our search region -
+      // from zero to the full size of the thing
+      for (
+        let searchIndexY = sensorGridSearchRegionYIndexStartInclusive;
+        searchIndexY <= sensorGridSearchRegionYIndexEndInclusive;
+        searchIndexY++
+      ) {
+        for (
+          let searchIndexX = sensorGridSearchRegionXIndexStartInclusive;
+          searchIndexX <= sensorGridSearchRegionXIndexEndInclusive;
+          searchIndexX++
+        ) {
+          const sensorSquareTopLeftSpatialX = searchIndexX * SENSOR_SQUARE_SIZE;
+          const sensorSquareTopLeftSpatialY = searchIndexY * SENSOR_SQUARE_SIZE;
+          const sensorSquareWidth = SENSOR_SQUARE_SIZE;
+          const sensorSquareHeight = SENSOR_SQUARE_SIZE;
+          const pipeTopSectionTopLeftSpatialX = pipeX - PIPE_WIDTH / 2;
+          const pipeTopSectionTopLeftSpatialY = 0;
+          const pipeTopSectionWidth = PIPE_WIDTH;
+          const pipeTopSectionHeight = pipeY - PIPE_WINDOW_SIZE / 2;
+          const pipeBottomSectionTopLeftSpatialX = pipeX - PIPE_WIDTH / 2;
+          const pipeBottomSectionTopLeftSpatialY = pipeY + PIPE_WINDOW_SIZE / 2;
+          const pipeBottomSectionWidth = PIPE_WIDTH;
+          const pipeBottomSectionHeight = 480 - pipeY - PIPE_WINDOW_SIZE / 2;
+
+          const sensorSquareRect = {
+            x: sensorSquareTopLeftSpatialX,
+            y: sensorSquareTopLeftSpatialY,
+            width: sensorSquareWidth,
+            height: sensorSquareHeight,
+          };
+
+          const pipeTopSectionRect = {
+            x: pipeTopSectionTopLeftSpatialX,
+            y: pipeTopSectionTopLeftSpatialY,
+            width: pipeTopSectionWidth,
+            height: pipeTopSectionHeight,
+          };
+
+          const pipeBottomSectionRect = {
+            x: pipeBottomSectionTopLeftSpatialX,
+            y: pipeBottomSectionTopLeftSpatialY,
+            width: pipeBottomSectionWidth,
+            height: pipeBottomSectionHeight,
+          };
+
+          function drawDebugRectForCollisions(r, fs) {
+            ctx.strokeStyle = "1px solid black";
+            ctx.fillStyle = fs;
+            ctx.fillRect(r.x, r.y, r.width, r.height);
+            ctx.strokeRect(r.x, r.y, r.width, r.height);
+          }
+
+          drawDebugRectForCollisions(
+            sensorSquareRect,
+            "rgba(128,255,255,0.25)"
+          );
+
+          if (
+            checkRectanglesCollide(sensorSquareRect, pipeTopSectionRect) ||
+            checkRectanglesCollide(sensorSquareRect, pipeBottomSectionRect)
+          ) {
+            sensorGridRef.current[searchIndexY][searchIndexX] = true;
+          }
+        }
+      }
+    }
+
+    for (let sgIndexY = 0; sgIndexY < numSquaresY; sgIndexY++) {
+      for (let sgIndexX = 0; sgIndexX < numSquaresX; sgIndexX++) {
+        if (!sensorGridRef.current[sgIndexY][sgIndexX]) {
+          continue;
+        }
+        const topLeftSpatialX = sgIndexX * SENSOR_SQUARE_SIZE;
+        const topLeftSpatialY = sgIndexY * SENSOR_SQUARE_SIZE;
+        ctx.fillStyle = "rgba(255,128,128,0.25)";
+        ctx.fillRect(topLeftSpatialX, topLeftSpatialY, SENSOR_SQUARE_SIZE, SENSOR_SQUARE_SIZE);
+      }
+    }
   }
 
   function gameLoop() {
@@ -227,12 +387,13 @@ ${Object.keys(metricsStateRef.current).join(", ")}
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+    if (!gameOverRef.current) {
+      computeAndDrawVisualSensorData(ctx);
+    }
+
     // Draw bird
-    // ctx.beginPath();
-    // ctx.arc(BIRD_X, birdStateRef.current.y, BIRD_RADIUS, 0, 2 * Math.PI);
-    ctx.fillStyle = "red"; // You can choose the fill color
-    // ctx.fill();
-    // ctx.closePath();
+    
+    ctx.fillStyle = "red";
 
     ctx.fillRect(
       BIRD_X - BIRD_RADIUS,
@@ -241,12 +402,8 @@ ${Object.keys(metricsStateRef.current).join(", ")}
       2 * BIRD_RADIUS
     );
 
-    // Draw Pipes
     for (const pipe of pipesStateRef.current) {
-      // The pipe y is the centerpoit of teh gap (thin air)
-      // the pipe x is te center of the pipe on the x axis (halfway through the thickness)
-      // Draw the top pipe (above the gap)
-      ctx.fillStyle = "green";
+      ctx.fillStyle = "rgba(255,128,255)";
       ctx.fillRect(
         pipe.x - PIPE_WIDTH / 2,
         0,
@@ -254,7 +411,8 @@ ${Object.keys(metricsStateRef.current).join(", ")}
         pipe.y - PIPE_WINDOW_SIZE / 2
       );
 
-      // Draw the bottom pipe (below the gap)
+      ctx.fillStyle = "rgba(255,255,128)";
+
       ctx.fillRect(
         pipe.x - PIPE_WIDTH / 2,
         pipe.y + PIPE_WINDOW_SIZE / 2,
@@ -263,17 +421,21 @@ ${Object.keys(metricsStateRef.current).join(", ")}
       );
     }
 
-    if (! gameOverRef.current){
+    if (!gameOverRef.current) {
       addElapstedTime(deltaTime);
     }
 
     //collision check
     if (birdStateRef.current.y >= 480) {
-      if (! gameOverRef.current) {incrementFloorHits();}
+      if (!gameOverRef.current) {
+        incrementFloorHits();
+      }
       setGameOver();
     }
     if (birdStateRef.current.y <= 0) {
-      if (! gameOverRef.current) {incrementCeilingHits();}
+      if (!gameOverRef.current) {
+        incrementCeilingHits();
+      }
       setGameOver();
     }
 
@@ -294,7 +456,9 @@ ${Object.keys(metricsStateRef.current).join(", ")}
               pipe.y + PIPE_WINDOW_SIZE / 2
           )
         ) {
-          if (! gameOverRef.current) {incrementBarHits();}
+          if (!gameOverRef.current) {
+            incrementBarHits();
+          }
           setGameOver();
           break;
         }
