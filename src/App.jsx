@@ -500,9 +500,9 @@ ${Object.keys(metricsStateRef.current).join(", ")}
   }
 
   useEffect(() => {
-    window.addEventListener("keydown", handleKeyPress);
+    window.addEventListener("keyup", handleKeyPress);
     return () => {
-      window.removeEventListener("keydown", handleKeyPress);
+      window.removeEventListener("keyup", handleKeyPress);
     };
   }, []);
 
