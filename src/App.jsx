@@ -5,6 +5,8 @@ import { checkRectanglesCollide } from "./lib/collision";
 
 import { useEffect, useRef } from "react";
 
+import useProcessNeuralNetwork from "./useProcessNeuralNetwork";
+
 /**
  * @typedef {object} Pipe - datastructure for the pipe
  * @property {number} x - x coordinate for center of pipe
@@ -14,17 +16,46 @@ import { useEffect, useRef } from "react";
  * used primarily to allow pipes to not need to be ordered when stored
  */
 
+/**
+ * @typedef {object} Size - size of an html element
+ * @property {number} width - width of element
+ * @property {number} height - height of element
+ */
+
 function App() {
   const frameLimiter = new FrameLimiter(60);
   const canvasRef = useRef(null);
-  const fpsDisplayRef = useRef(null);
+  const neuralNetworkCanvasRef = useRef(null);
+
+  function onResize() {
+    const canvasElement = neuralNetworkCanvasRef.current;
+    if (canvasElement) {
+      const rect = canvasElement.getBoundingClientRect();
+      console.log("neuralnetwork canvas width", rect.width);
+      console.log("neuralnetwork canvas height", rect.height);
+      canvasElement.width = rect.width;
+      canvasElement.height = rect.height;
+    } else {
+      console.log(
+        "page resize listener called before neural network canvas element mounted."
+      );
+    }
+  }
+
+  useEffect(() => {
+    console.log("attaching resize listener...");
+    window.addEventListener("resize", onResize);
+    return () => {
+      console.log("removing resize listener...");
+      window.removeEventListener("resize", onResize);
+    };
+  }, [neuralNetworkCanvasRef.current, onResize]);
 
   const BIRD_RADIUS = 15;
   const BIRD_X = 40;
-
   const PIPE_VELOCITY = 80; //pixels per second leftward moving velocity
-  const PIPE_SPACING = 240; //pixels between pipes
-  const PIPE_WINDOW_SIZE = 120;
+  const PIPE_SPACING = 200; //pixels between pipes
+  const PIPE_WINDOW_SIZE = 140;
   const PIPE_WINDOW_MIN_DISTANCE = 40;
   const PIPE_WIDTH = 40;
 
@@ -34,12 +65,10 @@ function App() {
   const minPipeY = PIPE_WINDOW_MIN_DISTANCE + PIPE_WINDOW_SIZE / 2;
   const maxPipeY = 480 - PIPE_WINDOW_MIN_DISTANCE - PIPE_WINDOW_SIZE / 2;
 
-  const GRAVITY_ACCELERATION = 400; //pixels per second squared
-  const FLAP_VELOCITY = 200; // pixels per second per full keypress
+  const GRAVITY_ACCELERATION = 250; //pixels per second squared
+  const FLAP_VELOCITY = 100; // pixels per second per full keypress
   // Using acceleration would be relevant if we cared about how long a button is held
   // but this does not apply to flappy bird
-
-
 
   const gameOverDisplayRef = useRef(null);
 
@@ -360,28 +389,49 @@ ${Object.keys(metricsStateRef.current).join(", ")}
         const topLeftSpatialX = sgIndexX * SENSOR_SQUARE_SIZE;
         const topLeftSpatialY = sgIndexY * SENSOR_SQUARE_SIZE;
         ctx.fillStyle = "rgba(255,128,128,0.25)";
-        ctx.fillRect(topLeftSpatialX, topLeftSpatialY, SENSOR_SQUARE_SIZE, SENSOR_SQUARE_SIZE);
+        ctx.fillRect(
+          topLeftSpatialX,
+          topLeftSpatialY,
+          SENSOR_SQUARE_SIZE,
+          SENSOR_SQUARE_SIZE
+        );
       }
     }
   }
 
+  function flapOrRestartGame() {
+    if (gameOverRef.current) {
+      resetGame();
+    } else {
+      birdStateRef.current.yVelocity -= FLAP_VELOCITY;
+    }
+  }
+
+  const processNeuralNetwork = useProcessNeuralNetwork();
+
   function gameLoop() {
     const canvas = canvasRef.current;
+    const neuralNetworkCanvas = neuralNetworkCanvasRef.current;
     if (!canvas) {
       console.warn("attempted to perform gameLoop before canvas was mounted");
       window.requestAnimationFrame(gameLoop);
       return;
     }
 
-    const ctx = canvas.getContext("2d");
-    const deltaTime = frameLimiter.getDeltaTime();
-    if (deltaTime === undefined) {
+    if (!neuralNetworkCanvas) {
+      console.warn(
+        "attempted to perform gameLoop before neural networkcanvas was mounted"
+      );
       window.requestAnimationFrame(gameLoop);
       return;
     }
 
-    if (fpsDisplayRef.current) {
-      fpsDisplayRef.current.textContent = (1.0 / deltaTime).toFixed(3);
+    const ctx = canvas.getContext("2d");
+    const neuralNetworkCtx = neuralNetworkCanvas.getContext("2d");
+    const deltaTime = frameLimiter.getDeltaTime();
+    if (deltaTime === undefined) {
+      window.requestAnimationFrame(gameLoop);
+      return;
     }
 
     // Clear canvas
@@ -391,8 +441,21 @@ ${Object.keys(metricsStateRef.current).join(", ")}
       computeAndDrawVisualSensorData(ctx);
     }
 
+    const shouldFlap = processNeuralNetwork(
+      deltaTime,
+      birdStateRef.current.y,
+      birdStateRef.current.yVelocity,
+      sensorGridRef.current,
+      getMetric("timeSurvived"),
+      neuralNetworkCtx,
+      neuralNetworkCanvasRef.current.width,
+      neuralNetworkCanvasRef.current.height
+    );
+    flapOrRestartGame();
+    console.log("should flap", shouldFlap);
+
     // Draw bird
-    
+
     ctx.fillStyle = "red";
 
     ctx.fillRect(
@@ -489,28 +552,11 @@ ${Object.keys(metricsStateRef.current).join(", ")}
     window.requestAnimationFrame(gameLoop);
   }
 
-  function handleKeyPress(e) {
-    if (e.code === "Space") {
-      if (gameOverRef.current) {
-        resetGame();
-      } else {
-        birdStateRef.current.yVelocity -= FLAP_VELOCITY;
-      }
-    }
-  }
-
   useEffect(() => {
-    window.addEventListener("keyup", handleKeyPress);
-    return () => {
-      window.removeEventListener("keyup", handleKeyPress);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (canvasRef.current) {
+    if (canvasRef.current && neuralNetworkCanvasRef.current) {
       window.requestAnimationFrame(gameLoop);
     }
-  }, [canvasRef.current]);
+  }, [canvasRef.current, neuralNetworkCanvasRef.current]);
 
   return (
     <div
@@ -527,7 +573,14 @@ ${Object.keys(metricsStateRef.current).join(", ")}
         style={{
           flex: 1,
         }}
-      ></div>
+      >
+        <canvas
+          width={0}
+          height={0}
+          className="neural-network-canvas"
+          ref={neuralNetworkCanvasRef}
+        ></canvas>
+      </div>
 
       <div
         className="vstack"
@@ -558,16 +611,6 @@ ${Object.keys(metricsStateRef.current).join(", ")}
             width="640"
             height="480"
           ></canvas>
-          <div
-            style={{
-              position: "absolute",
-              top: 0,
-              left: 0,
-              color: "black",
-              fontSize: "16px",
-            }}
-            ref={fpsDisplayRef}
-          ></div>
 
           <div
             style={{
@@ -606,11 +649,7 @@ ${Object.keys(metricsStateRef.current).join(", ")}
           flex: 1,
         }}
       >
-        {/* 
-        will put table here - the table will have score, time elapsed, 
-        distance to nearest pipe, survival time, best time survived
-        */}
-        <table>
+        <table className="metrics-table">
           <thead>
             <tr>
               <th>Metric Name</th>

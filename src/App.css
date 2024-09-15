@@ -11,3 +11,45 @@
 .vispanel-metrics {
     gap:4px;
 }
+
+.metrics-table {
+    border-collapse: collapse;
+    table-layout: fixed;
+    width:100%;
+    box-sizing:border-box;
+    border:2px solid black; 
+}
+
+.metrics-table th {
+    font-size:24px;
+    font-weight:bold;
+    text-align:center;
+    border:2px solid black; 
+}
+
+.metrics-table td {
+    padding:0.25em;
+    font-size:18px;
+
+}
+
+.metrics-table td:first-child {
+    font-weight:bold;
+    text-align:right;
+    border-right:2px solid black;
+}
+
+.metrics-table td:last-child {
+    text-align:left;
+    border-left:2px solid black;
+}
+
+.metrics-table tr:nth-child(even) {
+    background-color: skyblue;
+}
+
+.neural-network-canvas {
+    width:100%;
+    aspect-ratio:1.0;
+    border:1px solid black; 
+}
